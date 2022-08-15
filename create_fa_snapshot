@@ -1,0 +1,112 @@
+SET SERVEROUTPUT ON
+SET LINESIZE 200
+
+define p_wallet_d = 'file:/home/oracle/dbc/commonstore/wallets/ssl';
+define p_wallet_p = 'MyPassword1';
+
+CREATE OR REPLACE PROCEDURE fa_snapshot (
+  p_url              IN  VARCHAR2,
+  p_token            IN  VARCHAR2 DEFAULT NULL,
+  p_pgroup           IN  VARCHAR2 DEFAULT NULL,
+  p_wallet_path      IN  VARCHAR2 DEFAULT NULL,
+  p_wallet_password  IN  VARCHAR2 DEFAULT NULL
+) AS
+  l_http_request       UTL_HTTP.req;
+  l_http_response      UTL_HTTP.resp;
+  l_body               VARCHAR2(4000);
+  l_text               VARCHAR2(32767);
+  l_name               VARCHAR2(256);
+  l_value              VARCHAR2(1024);
+  l_cookie             VARCHAR2(1024);
+  l_path               VARCHAR2(200);
+ 
+BEGIN
+  UTL_HTTP.set_wallet('&p_wallet_d','&p_wallet_p');
+
+  -- If using HTTPS, open a wallet containing the trusted root certificate.
+  IF p_wallet_path IS NOT NULL AND p_wallet_password IS NOT NULL THEN
+    UTL_HTTP.set_wallet('file:' || p_wallet_path, p_wallet_password);
+  END IF;
+
+  dbms_output.put_line('Create FlashArray Session');
+  dbms_output.put_line('-----------------------------------------------');
+
+  l_path := p_url || '/api/1.19/auth/session';
+  l_body := '{"api_token":"' || p_token ||'"}';
+
+  -- Prepare for Create session
+  l_http_request := UTL_HTTP.begin_request(l_path, 'POST' );
+
+  -- set Headers
+  UTL_HTTP.set_header(l_http_request, 'user-agent', 'mozilla/4.0');
+  UTL_HTTP.set_header(l_http_request, 'content-type', 'application/json');
+  UTL_HTTP.set_header(l_http_request, 'Content-Length', length(l_body));
+  
+  -- set Body of request
+  UTL_HTTP.write_text(l_http_request, l_body);
+
+  -- get Response 
+  l_http_response := UTL_HTTP.get_response(l_http_request);
+  dbms_output.put_line('Response status code: ' || l_http_response.status_code);
+  
+  -- Loop through the response.
+  BEGIN
+    LOOP
+      UTL_HTTP.read_text(l_http_response, l_text, 32766);
+      dbms_output.put_line ('Logon: ' || l_text);
+    END LOOP;
+  EXCEPTION
+    WHEN UTL_HTTP.end_of_body THEN
+     dbms_output.put_line ('>');
+  END;
+ 
+  -- Loop through HTTP headers
+  FOR i IN 1..UTL_HTTP.GET_HEADER_COUNT(l_http_response) LOOP
+    UTL_HTTP.GET_HEADER(l_http_response, i, l_name, l_value);
+    -- DBMS_OUTPUT.PUT_LINE(l_name || ': ' || l_value);
+    IF l_name = 'Set-Cookie' THEN
+      l_cookie := l_value;
+    END IF;
+  END LOOP;
+
+  dbms_output.put_line('Session Cookie: '||l_cookie);
+  -- UTL_HTTP.end_response(l_http_response);
+  
+  dbms_output.put_line('>');
+  dbms_output.put_line('Perform Protection Group Snapshot of ' || p_pgroup);
+  dbms_output.put_line('-----------------------------------------------');
+
+  l_path := p_url || '/api/1.19/pgroup';
+  l_body := '{"snap":"true","source": ["' || p_pgroup ||'" ]}';
+
+  dbms_output.put_line('>' || l_path);
+  dbms_output.put_line('' || l_body);
+
+  -- Make a HTTP request and get the response.
+  l_http_request := UTL_HTTP.begin_request(l_path, 'POST' );
+
+  -- set Headers
+  UTL_HTTP.set_header(l_http_request, 'user-agent', 'mozilla/4.0');
+  UTL_HTTP.set_header(l_http_request, 'content-type', 'application/json');
+  UTL_HTTP.set_header(l_http_request, 'Content-Length', length(l_body));
+
+  -- set Body of request
+  UTL_HTTP.write_text(l_http_request, l_body);
+
+  -- get Response
+  l_http_response := UTL_HTTP.get_response(l_http_request);
+  dbms_output.put_line('Response status code: ' || l_http_response.status_code);
+  
+  -- Loop through the response.
+  BEGIN
+    LOOP
+      UTL_HTTP.read_text(l_http_response, l_text, 32766);
+      dbms_output.put_line (l_text);
+    END LOOP;
+  EXCEPTION
+    WHEN UTL_HTTP.end_of_body THEN
+      UTL_HTTP.end_response(l_http_response);
+  END;
+  
+END fa_snapshot;
+/  
